@@ -1,6 +1,25 @@
 provider "aws" {
   version = "~> 3.0"
-  region  = "us-east-1"
+}
+
+variable "building_ip" {
+  description = "Default allows all SSH agents. Set to restrict to specific IP"
+  default     = "0.0.0.0/0"
+}
+
+variable "ami_id" {
+  description = "AMI to test"
+  default     = "ami-08995713cf5b30d87"
+}
+
+variable "key_pair" {
+  description = "AWS Key Pair to access the instance"
+}
+
+data "aws_region" "current" {}
+
+locals {
+  target_az = "${data.aws_region.current.name}a"
 }
 
 resource "aws_volume_attachment" "ebs_att" {
@@ -10,13 +29,14 @@ resource "aws_volume_attachment" "ebs_att" {
 }
 
 resource "aws_instance" "elastic-search" {
-  ami               = "ami-08995713cf5b30d87"
-  availability_zone = "us-east-1a"
-  instance_type     = "t3.medium"
-  subnet_id = aws_subnet.main.id
+  ami                         = var.ami_id
+  availability_zone           = local.target_az
+  instance_type               = "t3.medium"
+  subnet_id                   = aws_subnet.main.id
   associate_public_ip_address = true
+  key_name = var.key_pair
 
-  vpc_security_group_ids = [aws_security_group.allow_http.id]
+  vpc_security_group_ids = [aws_security_group.allow_http.id, aws_security_group.allow_ssh.id]
   tags = {
     Name = "ElasticSearch"
   }
@@ -25,7 +45,7 @@ resource "aws_instance" "elastic-search" {
 }
 
 resource "aws_ebs_volume" "volume" {
-  availability_zone = "us-east-1a"
+  availability_zone = local.target_az
   size              = 1
 }
 
@@ -42,9 +62,9 @@ resource "aws_internet_gateway" "gw" {
 }
 
 resource "aws_subnet" "main" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = "10.0.1.0/24"
-  availability_zone = "us-east-1a"
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.1.0/24"
+  availability_zone = local.target_az
 
   tags = {
     Name = "Main"
@@ -55,14 +75,6 @@ resource "aws_security_group" "allow_http" {
   name        = "allow_http"
   description = "Allow Http inbound traffic"
   vpc_id      = aws_vpc.main.id
-
-  ingress {
-    description = "Http traffic from VPC"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   ingress {
     description = "Http traffic from VPC"
@@ -85,13 +97,30 @@ resource "aws_security_group" "allow_http" {
   }
 }
 
+resource "aws_security_group" "allow_ssh" {
+  name        = "allow_ssh"
+  description = "Allow SSH traffic from controlled host set"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.building_ip]
+  }
+
+  tags = {
+    Name = "allow_ssh"
+  }
+}
+
 resource "aws_route_table" "route-table" {
   vpc_id = aws_vpc.main.id
 
   route {
-      cidr_block = "0.0.0.0/0"
-      gateway_id = aws_internet_gateway.gw.id
-    }
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.gw.id
+  }
 }
 
 resource "aws_route_table_association" "subnet-association" {
