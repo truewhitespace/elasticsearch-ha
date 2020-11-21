@@ -29,7 +29,7 @@
   },
   {
     "type": "shell",
-    "script": "demo-script.sh"
+    "script": "setup.sh"
   }
   ]
 }
